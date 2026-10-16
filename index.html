@@ -79,11 +79,11 @@ if(ctx.imageSmoothingQuality)ctx.imageSmoothingQuality='high';
 // ============================================================================
 const SPRITES={};
 
-// Coordenadas exactas de cada pose en la plantilla (excluyendo todos los textos)
+// Coordenadas exactas con recortes de esquina (cut) para borrar restos de poses vecinas
 const REGIONS={
- mario_idle: { x: 0.016, y: 0.095, w: 0.144, h: 0.400 },
- mario_run:  { x: 0.153, y: 0.130, w: 0.168, h: 0.365 },
- mario_jump: { x: 0.315, y: 0.056, w: 0.138, h: 0.432 },
+ mario_idle: { x: 0.016, y: 0.096, w: 0.143, h: 0.394, cut: [[0.84, 0.40, 0.16, 0.60]] },
+ mario_run:  { x: 0.152, y: 0.132, w: 0.170, h: 0.362, cut: [[0, 0, 0.36, 0.38], [0.87, 0, 0.13, 0.36]] },
+ mario_jump: { x: 0.315, y: 0.056, w: 0.136, h: 0.376, cut: [[0, 0.52, 0.15, 0.48]] },
  buddy_idle: { x: 0.502, y: 0.120, w: 0.108, h: 0.392 },
  buddy_run:  { x: 0.636, y: 0.122, w: 0.138, h: 0.388 },
  peach:      { x: 0.798, y: 0.098, w: 0.156, h: 0.414 },
@@ -91,7 +91,7 @@ const REGIONS={
  goomba_2:   { x: 0.163, y: 0.658, w: 0.100, h: 0.302 },
  koopa_1:    { x: 0.326, y: 0.645, w: 0.116, h: 0.318 },
  koopa_2:    { x: 0.460, y: 0.645, w: 0.116, h: 0.318 },
- boss_1:     { x: 0.604, y: 0.600, w: 0.150, h: 0.370 },
+ boss_1:     { x: 0.604, y: 0.600, w: 0.150, h: 0.370, cut: [[0.92, 0, 0.08, 0.45]] },
  boss_2:     { x: 0.756, y: 0.608, w: 0.224, h: 0.362 }
 };
 
@@ -106,12 +106,44 @@ function cropAndTrimSprite(img, reg){
  const cx=c.getContext('2d',{willReadFrequently:true});
  cx.drawImage(img,sx,sy,sw,sh,0,0,sw,sh);
 
+ // Borra las esquinas donde asoman manos o pies del personaje de al lado
+ if(reg.cut){
+  reg.cut.forEach(([rx,ry,rw,rh])=>cx.clearRect(sw*rx,sh*ry,sw*rw,sh*rh));
+ }
+
  try{
-  const d=cx.getImageData(0,0,sw,sh).data;
+  const imgData=cx.getImageData(0,0,sw,sh);
+  const d=imgData.data;
+
+  // Conserva únicamente el cuerpo central del personaje y elimina islas sueltas en los bordes
+  const keep=new Uint8Array(sw*sh);
+  const q=new Int32Array(sw*sh);
+  let head=0,tail=0;
+  const cx0=Math.floor(sw*0.35),cx1=Math.ceil(sw*0.65);
+  const cy0=Math.floor(sh*0.25),cy1=Math.ceil(sh*0.75);
+  for(let y=cy0;y<cy1;y++){
+   for(let x=cx0;x<cx1;x++){
+    const p=y*sw+x;
+    if(d[p*4+3]>25){keep[p]=1;q[tail++]=p;}
+   }
+  }
+  while(head<tail){
+   const p=q[head++],px=p%sw,py=(p/sw)|0;
+   for(let dy=-3;dy<=3;dy++){
+    const ny=py+dy;if(ny<0||ny>=sh)continue;
+    for(let dx=-3;dx<=3;dx++){
+     const nx=px+dx;if(nx<0||nx>=sw)continue;
+     const np=ny*sw+nx;
+     if(!keep[np]&&d[np*4+3]>25){keep[np]=1;q[tail++]=np;}
+    }
+   }
+  }
   let minX=sw,minY=sh,maxX=0,maxY=0;
   for(let y=0;y<sh;y++){
    for(let x=0;x<sw;x++){
-    if(d[(y*sw+x)*4+3]>25){
+    const p=y*sw+x;
+    if(!keep[p]){d[p*4+3]=0;}
+    else{
      if(x<minX)minX=x;
      if(x>maxX)maxX=x;
      if(y<minY)minY=y;
@@ -119,6 +151,7 @@ function cropAndTrimSprite(img, reg){
     }
    }
   }
+  cx.putImageData(imgData,0,0);
   if(maxX>minX&&maxY>minY){
    const tw=maxX-minX+1,th=maxY-minY+1;
    const trimmed=document.createElement('canvas');
