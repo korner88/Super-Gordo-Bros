@@ -688,36 +688,213 @@ function draw(){
  }
 }
 
-// Entrada simultánea: teclado y botones multitáctiles
+// Entrada simultánea: teclado, multitouch real y editor manteniendo presionada la pantalla
 const keyMap={ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right',
  Space:'jump',ArrowUp:'jump',KeyW:'jump',ShiftLeft:'run',ShiftRight:'run'};
-const heldKeys=new Set(),heldPointers=new Map();
+const padBtns=[...document.querySelectorAll('[data-key]')];
+const heldKeys=new Set(),touchKeys=new Set();
+let editMode=false,selectedBtn=null,dragBtn=null,dragOff={x:0,y:0};
+let holdTimer=null,holdHintTimer=null,holdStart={x:0,y:0};
+
+// Barra flotante para el Modo Edición de botones
+const editBar=document.createElement('div');
+editBar.style.cssText='display:none;position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:10;background:#102039f2;border:2px solid #ffdc78;border-radius:14px;padding:8px 12px;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center;box-shadow:0 10px 30px #000a;font:700 12px monospace;color:#ffdc78';
+editBar.innerHTML=`<span>ARRASTRA LOS BOTONES</span>
+<button id="btn-minus" style="padding:5px 10px;font-size:14px">−</button>
+<button id="btn-plus" style="padding:5px 10px;font-size:14px">+</button>
+<button id="btn-reset-pad" style="padding:5px 10px;font-size:12px;background:#5a2a2a">REINICIAR</button>
+<button id="btn-save-pad" style="padding:5px 12px;font-size:12px;background:#1e6f46;border-color:#7dffb3">✓ LISTO</button>`;
+document.body.appendChild(editBar);
+
+const holdHint=document.createElement('div');
+holdHint.style.cssText='display:none;position:fixed;top:72px;left:50%;transform:translateX(-50%);z-index:9;background:#102039dd;border:1px solid #8cdbff;border-radius:10px;padding:6px 12px;font:700 12px monospace;color:#8cdbff;pointer-events:none';
+holdHint.textContent='Mantén presionado para editar botones...';
+document.body.appendChild(holdHint);
+
+// Cargar y guardar posiciones personalizadas de los botones
+function applyPadLayout(layout){
+ padBtns.forEach(b=>{
+  const k=b.dataset.key, cfg=layout&&layout[k];
+  if(cfg){
+   const s=cfg.scale||1;
+   b.dataset.scale=s;
+   b.style.position='fixed';
+   b.style.left=clamp(cfg.xPct*innerWidth,0,innerWidth-b.offsetWidth)+'px';
+   b.style.top=clamp(cfg.yPct*innerHeight,0,innerHeight-b.offsetHeight)+'px';
+   b.style.margin='0';
+   b.style.pointerEvents='auto';
+   b.style.transform=`scale(${s})`;
+  }else{
+   b.dataset.scale=1;
+   b.style.position='';b.style.left='';b.style.top='';b.style.margin='';b.style.transform='';
+  }
+ });
+}
+function savePadLayout(){
+ const layout={};
+ padBtns.forEach(b=>{
+  const r=b.getBoundingClientRect(), s=+(b.dataset.scale||1);
+  layout[b.dataset.key]={xPct:(r.left+(r.width-b.offsetWidth)/2)/innerWidth,yPct:(r.top+(r.height-b.offsetHeight)/2)/innerHeight,scale:s};
+ });
+ try{localStorage.setItem('coima-pad-layout',JSON.stringify(layout))}catch(e){}
+}
+function loadPadLayout(){
+ try{
+  const raw=localStorage.getItem('coima-pad-layout');
+  if(raw)applyPadLayout(JSON.parse(raw));
+ }catch(e){}
+}
+window.addEventListener('resize',loadPadLayout);
+setTimeout(loadPadLayout,50);
+
+function toggleEditMode(force){
+ editMode=force!==undefined?force:!editMode;
+ clearHoldTimer();releaseAll();
+ $('touch').style.display='block';
+ if(editMode){
+  if(mode==='play'){mode='edit-pause'}
+  // Fijar coordenadas actuales antes de arrastrar
+  const rects=padBtns.map(b=>({b,r:b.getBoundingClientRect()}));
+  rects.forEach(({b,r})=>{
+   const s=+(b.dataset.scale||1);
+   b.dataset.scale=s;
+   b.style.position='fixed';
+   b.style.left=(r.left+(r.width-b.offsetWidth)/2)+'px';
+   b.style.top=(r.top+(r.height-b.offsetHeight)/2)+'px';
+   b.style.margin='0';
+   b.style.pointerEvents='auto';
+   b.style.outline='2px dashed #ffdc78';
+   b.style.transform=`scale(${s})`;
+  });
+  selectedBtn=padBtns[0];
+  editBar.style.display='flex';
+  sound('power');
+ }else{
+  padBtns.forEach(b=>b.style.outline='');
+  editBar.style.display='none';
+  savePadLayout();
+  if(mode==='edit-pause')mode='play';
+ }
+}
+
+function resizeSelected(delta){
+ const targets=selectedBtn?[selectedBtn]:padBtns;
+ targets.forEach(b=>{
+  const s=clamp(+(b.dataset.scale||1)+delta,0.65,1.65);
+  b.dataset.scale=s;
+  b.style.transform=`scale(${s})`;
+ });
+ savePadLayout();
+}
+$('btn-minus').onclick=e=>{e.stopPropagation();resizeSelected(-0.12)};$('btn-plus').onclick=e=>{e.stopPropagation();resizeSelected(0.12)};
+$('btn-reset-pad').onclick=e=>{ e.stopPropagation(); try{localStorage.removeItem('coima-pad-layout')}catch(err){} applyPadLayout(null); toggleEditMode(false); };$('btn-save-pad').onclick=e=>{e.stopPropagation();toggleEditMode(false)};
+
 function syncInput(){
  const next={left:false,right:false,jump:false,run:false};
  for(const code of heldKeys)if(keyMap[code])next[keyMap[code]]=true;
- for(const v of heldPointers.values())next[v]=true;
+ for(const k of touchKeys)next[k]=true;
  if(next.jump&&!keys.jump)jumpQueued=true;
  keys=next;
- document.querySelectorAll('[data-key]').forEach(b=>b.classList.toggle('down',keys[b.dataset.key]));
+ padBtns.forEach(b=>{
+  const s=+(b.dataset.scale||1);
+  b.classList.toggle('down',keys[b.dataset.key]);
+  if(b.style.position==='fixed')b.style.transform=`scale(${s})${keys[b.dataset.key]?' translateY(3px)':''}`;
+ });
 }
-function releaseAll(){heldKeys.clear();heldPointers.clear();clearInput()}
+function releaseAll(){heldKeys.clear();touchKeys.clear();clearInput()}
+
 window.addEventListener('keydown',e=>{
  if(keyMap[e.code]||['KeyP','Escape','Enter'].includes(e.code))e.preventDefault();
  if(e.repeat)return;
- if(e.code==='KeyP'||e.code==='Escape'){pause();return}
- if(e.code==='Enter'&&mode!=='play'){startAction();return}
+ if(e.code==='KeyP'||e.code==='Escape'){if(editMode)toggleEditMode(false);else pause();return}
+ if(e.code==='Enter'&&mode!=='play'&&!editMode){startAction();return}
  heldKeys.add(e.code);syncInput();
 });
 window.addEventListener('keyup',e=>{heldKeys.delete(e.code);syncInput()});
-document.querySelectorAll('[data-key]').forEach(b=>{
- b.addEventListener('pointerdown',e=>{
- e.preventDefault();audio();b.setPointerCapture(e.pointerId);
- heldPointers.set(e.pointerId,b.dataset.key);syncInput();
- });
- const up=e=>{heldPointers.delete(e.pointerId);syncInput()};
- b.addEventListener('pointerup',up);b.addEventListener('pointercancel',up);
- b.addEventListener('lostpointercapture',up);
-});
+
+// Multitouch real por detección de áreas (permite apretar varios botones y deslizar el dedo)
+function evaluateTouches(touches){
+ touchKeys.clear();
+ const margin=12; // Margen extra para presionar CORRER + SALTAR con un mismo pulgar
+ for(let i=0;i<touches.length;i++){
+  const tx=touches[i].clientX, ty=touches[i].clientY;
+  for(const b of padBtns){
+   const r=b.getBoundingClientRect();
+   if(tx>=r.left-margin&&tx<=r.right+margin&&ty>=r.top-margin&&ty<=r.bottom+margin){
+    touchKeys.add(b.dataset.key);
+   }
+  }
+ }
+ syncInput();
+}
+
+function clearHoldTimer(){
+ if(holdTimer){clearTimeout(holdTimer);holdTimer=null}
+ if(holdHintTimer){clearTimeout(holdHintTimer);holdHintTimer=null}
+ holdHint.style.display='none';
+}
+
+window.addEventListener('touchstart',e=>{
+ $('touch').style.display='block';
+ const touch=e.changedTouches[0];
+ const targetBtn=e.target.closest('[data-key]');
+ const isUiBtn=e.target.closest('#top button, #overlay button, #overlay label');
+
+ if(editMode){
+  if(e.target.closest('#btn-minus,#btn-plus,#btn-reset-pad,#btn-save-pad'))return;
+  if(targetBtn){
+   e.preventDefault();
+   dragBtn=targetBtn;selectedBtn=targetBtn;
+   padBtns.forEach(b=>b.style.outline=b===selectedBtn?'3px solid #7dffb3':'2px dashed #ffdc78');
+   const r=targetBtn.getBoundingClientRect();
+   dragOff.x=touch.clientX-(r.left+(r.width-targetBtn.offsetWidth)/2);
+   dragOff.y=touch.clientY-(r.top+(r.height-targetBtn.offsetHeight)/2);
+  }
+  return;
+ }
+
+ if(targetBtn){
+  e.preventDefault();audio();clearHoldTimer();
+  evaluateTouches(e.touches);
+ }else if(!isUiBtn&&e.touches.length===1){
+  // Mantener presionada la pantalla 2.2 segundos abre el editor de botones
+  holdStart={x:touch.clientX,y:touch.clientY};
+  clearHoldTimer();
+  holdHintTimer=setTimeout(()=>{holdHint.style.display='block'},450);
+  holdTimer=setTimeout(()=>{toggleEditMode(true)},2200);
+ }
+},{passive:false});
+
+window.addEventListener('touchmove',e=>{
+ if(editMode){
+  if(dragBtn){
+   e.preventDefault();
+   const touch=e.touches[0];
+   dragBtn.style.left=clamp(touch.clientX-dragOff.x,0,innerWidth-dragBtn.offsetWidth)+'px';
+   dragBtn.style.top=clamp(touch.clientY-dragOff.y,0,innerHeight-dragBtn.offsetHeight)+'px';
+  }
+  return;
+ }
+ if(holdTimer&&e.touches.length===1){
+  const dx=e.touches[0].clientX-holdStart.x, dy=e.touches[0].clientY-holdStart.y;
+  if(Math.hypot(dx,dy)>20)clearHoldTimer();
+ }
+ if(touchKeys.size>0||e.target.closest('[data-key]')){
+  e.preventDefault();
+  evaluateTouches(e.touches);
+ }
+},{passive:false});
+
+const endTouch=e=>{
+ clearHoldTimer();
+ if(editMode){
+  if(dragBtn&&e.touches.length===0){dragBtn=null;savePadLayout()}
+  return;
+ }
+ evaluateTouches(e.touches);
+};
+window.addEventListener('touchend',endTouch,{passive:false});
+window.addEventListener('touchcancel',endTouch,{passive:false});
 function startAction(){
  audio();releaseAll();
  if(mode==='pause'){mode='play';$('overlay').style.display='none'}
