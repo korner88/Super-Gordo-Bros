@@ -14,6 +14,7 @@ canvas{display:block;width:100%;height:100%;object-fit:contain;image-rendering:a
 #top{position:fixed;right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top));display:flex;gap:8px;z-index:4}
 button{font:700 17px monospace;color:white;background:#15253ddd;border:2px solid #ffffff66;border-radius:12px;cursor:pointer;touch-action:none}
 #top button{width:43px;height:40px}
+#top #edit-pad{background:#2e4a6d;border-color:#ffdc78}
 #touch{display:none;position:fixed;inset:0;pointer-events:none;z-index:3}
 .pad{position:absolute;bottom:max(16px,env(safe-area-inset-bottom));display:flex;gap:10px;pointer-events:auto}
 .left{left:max(14px,env(safe-area-inset-left))}
@@ -40,6 +41,7 @@ h1{font-size:clamp(27px,6vw,47px);margin:15px 0;color:#ffdc78;text-shadow:3px 3p
 <div id="top">
 <button id="sound" title="Sonido">♪</button>
 <button id="pause" title="Pausa">Ⅱ</button>
+<button id="edit-pad" title="Editar botones">⚙</button>
 <button id="full" title="Pantalla completa">⛶</button>
 </div>
 <div id="touch">
@@ -688,13 +690,12 @@ function draw(){
  }
 }
 
-// Entrada simultánea: teclado, multitouch real y editor manteniendo presionada la pantalla
+// Entrada simultánea: teclado, multitouch real y botón de edición superior
 const keyMap={ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right',
  Space:'jump',ArrowUp:'jump',KeyW:'jump',ShiftLeft:'run',ShiftRight:'run'};
 const padBtns=[...document.querySelectorAll('[data-key]')];
 const heldKeys=new Set(),touchKeys=new Set();
 let editMode=false,selectedBtn=null,dragBtn=null,dragOff={x:0,y:0};
-let holdTimer=null,holdHintTimer=null,holdStart={x:0,y:0};
 
 // Barra flotante para el Modo Edición de botones
 const editBar=document.createElement('div');
@@ -706,12 +707,6 @@ editBar.innerHTML=`<span>ARRASTRA LOS BOTONES</span>
 <button id="btn-save-pad" style="padding:5px 12px;font-size:12px;background:#1e6f46;border-color:#7dffb3">✓ LISTO</button>`;
 document.body.appendChild(editBar);
 
-const holdHint=document.createElement('div');
-holdHint.style.cssText='display:none;position:fixed;top:72px;left:50%;transform:translateX(-50%);z-index:9;background:#102039dd;border:1px solid #8cdbff;border-radius:10px;padding:6px 12px;font:700 12px monospace;color:#8cdbff;pointer-events:none';
-holdHint.textContent='Mantén presionado para editar botones...';
-document.body.appendChild(holdHint);
-
-// Cargar y guardar posiciones personalizadas de los botones
 function applyPadLayout(layout){
  padBtns.forEach(b=>{
   const k=b.dataset.key, cfg=layout&&layout[k];
@@ -749,11 +744,10 @@ setTimeout(loadPadLayout,50);
 
 function toggleEditMode(force){
  editMode=force!==undefined?force:!editMode;
- clearHoldTimer();releaseAll();
+ releaseAll();
  $('touch').style.display='block';
  if(editMode){
-  if(mode==='play'){mode='edit-pause'}
-  // Fijar coordenadas actuales antes de arrastrar
+  if(mode==='play')mode='edit-pause';
   const rects=padBtns.map(b=>({b,r:b.getBoundingClientRect()}));
   rects.forEach(({b,r})=>{
    const s=+(b.dataset.scale||1);
@@ -776,6 +770,8 @@ function toggleEditMode(force){
   if(mode==='edit-pause')mode='play';
  }
 }
+
+$('edit-pad').onclick=()=>{audio();toggleEditMode()};
 
 function resizeSelected(delta){
  const targets=selectedBtn?[selectedBtn]:padBtns;
@@ -812,10 +808,9 @@ window.addEventListener('keydown',e=>{
 });
 window.addEventListener('keyup',e=>{heldKeys.delete(e.code);syncInput()});
 
-// Multitouch real por detección de áreas (permite apretar varios botones y deslizar el dedo)
 function evaluateTouches(touches){
  touchKeys.clear();
- const margin=12; // Margen extra para presionar CORRER + SALTAR con un mismo pulgar
+ const margin=12;
  for(let i=0;i<touches.length;i++){
   const tx=touches[i].clientX, ty=touches[i].clientY;
   for(const b of padBtns){
@@ -828,20 +823,13 @@ function evaluateTouches(touches){
  syncInput();
 }
 
-function clearHoldTimer(){
- if(holdTimer){clearTimeout(holdTimer);holdTimer=null}
- if(holdHintTimer){clearTimeout(holdHintTimer);holdHintTimer=null}
- holdHint.style.display='none';
-}
-
 window.addEventListener('touchstart',e=>{
  $('touch').style.display='block';
  const touch=e.changedTouches[0];
  const targetBtn=e.target.closest('[data-key]');
- const isUiBtn=e.target.closest('#top button, #overlay button, #overlay label');
 
  if(editMode){
-  if(e.target.closest('#btn-minus,#btn-plus,#btn-reset-pad,#btn-save-pad'))return;
+  if(e.target.closest('#btn-minus,#btn-plus,#btn-reset-pad,#btn-save-pad,#edit-pad'))return;
   if(targetBtn){
    e.preventDefault();
    dragBtn=targetBtn;selectedBtn=targetBtn;
@@ -854,14 +842,8 @@ window.addEventListener('touchstart',e=>{
  }
 
  if(targetBtn){
-  e.preventDefault();audio();clearHoldTimer();
+  e.preventDefault();audio();
   evaluateTouches(e.touches);
- }else if(!isUiBtn&&e.touches.length===1){
-  // Mantener presionada la pantalla 2.2 segundos abre el editor de botones
-  holdStart={x:touch.clientX,y:touch.clientY};
-  clearHoldTimer();
-  holdHintTimer=setTimeout(()=>{holdHint.style.display='block'},450);
-  holdTimer=setTimeout(()=>{toggleEditMode(true)},2200);
  }
 },{passive:false});
 
@@ -875,10 +857,6 @@ window.addEventListener('touchmove',e=>{
   }
   return;
  }
- if(holdTimer&&e.touches.length===1){
-  const dx=e.touches[0].clientX-holdStart.x, dy=e.touches[0].clientY-holdStart.y;
-  if(Math.hypot(dx,dy)>20)clearHoldTimer();
- }
  if(touchKeys.size>0||e.target.closest('[data-key]')){
   e.preventDefault();
   evaluateTouches(e.touches);
@@ -886,7 +864,6 @@ window.addEventListener('touchmove',e=>{
 },{passive:false});
 
 const endTouch=e=>{
- clearHoldTimer();
  if(editMode){
   if(dragBtn&&e.touches.length===0){dragBtn=null;savePadLayout()}
   return;
