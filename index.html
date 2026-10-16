@@ -59,7 +59,7 @@ h1{font-size:clamp(27px,6vw,47px);margin:15px 0;color:#ffdc78;text-shadow:3px 3p
 <p id="description">Cruza el barrio, recoge dólares y comida chatarra, y rescata a la princesa. Tu compañero verde te sigue hasta el final.</p>
 <button id="start">INSERT COIMA</button>
 <p id="instructions">A/D o flechas: mover · Espacio: saltar<br>Shift: correr · P: pausa<br>En el teléfono, usa los botones táctiles.</p>
-<p class="note">Hamburguesa: protección · Papas: invencibilidad<br>Salta sobre enemigos y sobre el jefe cuando no tenga pinchos.</p>
+<p class="note">Hamburguesa: protección · Papas: invencibilidad<br>Salta sobre enemigos y sobre el jefecito cuando no tenga pinchos.</p>
 </div></div>
 
 <script>
@@ -387,7 +387,7 @@ function update(dt){
  if(player.x>3020&&checkpoint<3020){
  checkpoint=3020;flag=true;score+=250;text('PUNTO DE CONTROL',3030,300,'#a1ffb5');sound('power');
  }
- if(player.x>5480&&checkpoint<5480){checkpoint=5480;text('EL JEFE TE ESPERA',5500,270,'#ffb89b')}
+ if(player.x>5480&&checkpoint<5480){checkpoint=5480;text('EL JEFECITO TE ESPERA',5500,270,'#ffb89b')}
  if(player.x>5480&&!boss.dead)player.x=Math.min(player.x,6260);
 
  for(const b of blocks)b.bump=Math.max(0,(b.bump||0)-dt);
@@ -625,7 +625,7 @@ function draw(){
  background();
  ctx.save();ctx.translate(-Math.round(cam)+(shake?rnd(-shake,shake):0),shake?rnd(-shake*.35,shake*.35):0);
  ground();drawBlocks();
- sign(175,359,'COMIDA →');sign(5480,359,'JEFE →');
+ sign(175,359,'COMIDA →');sign(5480,359,'JEFECITO →');
  rect(3040,300,5,148,'#e9eef1');
  path([[3045,302],[3090,315],[3045,333]],flag?'#65e8a4':'#e0b579');
  // Castillo al final
@@ -679,7 +679,7 @@ function draw(){
  label('PAPAS POWER',20,105,12,'#fff3ac');
  }
  if(player&&player.x>5400&&!boss.dead){
- rect(342,82,276,42,'#142139d9');label('JEFE',354,108,15,'#ffc49d');
+ rect(342,82,276,42,'#142139d9');label('JEFECITO',354,108,15,'#ffc49d');
  for(let i=0;i<5;i++)rect(413+i*38,94,29,17,i<boss.hp?'#eb6861':'#4c4f63');
  if(boss.spiky)label('ESPERA A QUE BAJE LOS PINCHOS',480,149,14,'#ffef9c','center');
  }
